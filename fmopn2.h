@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2022-2023 nukeykt
  *
- * This file is part of Nuked-MD.
+ * This file is part of YMF276-LLE.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -13,12 +13,12 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- *  YM3438 emulator.
+ *  YMF276/YM3438 emulator.
  *  Thanks:
  *      John McMaster (siliconpr0n.org):
  *          Yamaha YM3438 & YM2610 decap and die shot.
  *      org, andkorzh, HardWareMan (emu-russia):
- *          help & support, YM2612 decap.
+ *          help & support, YMF276 and YM2612 decap.
  *
  */
 
@@ -26,7 +26,7 @@
 #include <stdint.h>
 
 enum {
-    fm_flags_ym2612 = 1,
+    fm_flags_ym3438 = 1,
 };
 
 typedef struct {
@@ -43,6 +43,12 @@ typedef struct {
     int prescaler_latch[2]; // 6
     int phi1_latch[2];
     int phi2_latch[2];
+    int dphi1_latch[4];
+    int dphi2_latch[3];
+    int dclk1;
+    int dclk2;
+    int o_bco;
+    int fsm_reset;
 } fm_prescaler_t;
 
 typedef struct {
@@ -268,7 +274,7 @@ typedef struct {
 
     // accumulator
 
-    int ch_accm[9][2];
+    int ch_accm[14][2];
     int ch_out[9][2];
     int ch_out_dlatch;
     int ch_out_pan_dlatch;
@@ -324,20 +330,17 @@ typedef struct {
     int fsm_dac_load;
     int fsm_dac_out_sel;
     int fsm_dac_ch6;
-    // ym2612 FSM
-    int fsm_out[26];
-    int fsm_op4_sel_l;
-    int fsm_op1_sel_l;
-    int fsm_op2_sel_l;
-    int fsm_op3_sel_l;
+
+    // ymf276
     int fsm_clock_eg_l;
-    int fsm_clock_timers1_l;
-    int fsm_clock_timers_l;
+    int fsm_op1_sel_l;
+    int fsm_sel1_l;
+    int fsm_sel2_l;
     int fsm_sel23_l;
     int fsm_ch3_sel_l;
-    int fsm_dac_ch6_l;
     int fsm_dac_load_l;
     int fsm_dac_out_sel_l;
+    int fsm_dac_ch6_l;
 
     int status_time;
     int last_status;

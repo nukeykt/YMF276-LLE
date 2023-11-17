@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2022-2023 nukeykt
  *
- * This file is part of Nuked-MD.
+ * This file is part of YMF276-LLE.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -13,16 +13,16 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- *  YM3438 emulator.
+ *  YMF276/YM3438 emulator.
  *  Thanks:
  *      John McMaster (siliconpr0n.org):
  *          Yamaha YM3438 & YM2610 decap and die shot.
  *      org, andkorzh, HardWareMan (emu-russia):
- *          help & support, YM2612 decap.
+ *          help & support, YMF276 and YM2612 decap.
  *
  */
 
-// YM3438/YM2612 core
+// YMF276/YM3438 core
 
 #include <stdio.h>
 #include <string.h>
@@ -92,6 +92,12 @@ void FM_Prescaler(fm_prescaler_t *chip)
 
         chip->phi1_latch[0] = (chip->prescaler_latch[1] & 0x21) != 0;
         chip->phi2_latch[0] = (chip->prescaler_latch[1] & 0xc) != 0;
+
+        chip->dphi1_latch[0] = (chip->prescaler_latch[1] & 0x9) != 0;
+        chip->dphi2_latch[0] = (chip->prescaler_latch[1] & 0x24) != 0;
+
+        chip->dphi1_latch[2] = chip->dphi1_latch[1];
+        chip->dphi2_latch[2] = chip->dphi2_latch[1];
     }
     else
     {
@@ -100,7 +106,19 @@ void FM_Prescaler(fm_prescaler_t *chip)
         chip->prescaler_latch[1] = chip->prescaler_latch[0] & 0x3f;
         chip->phi1_latch[1] = chip->phi1_latch[0] & 0x1;
         chip->phi2_latch[1] = chip->phi2_latch[0] & 0x1;
+
+        chip->dphi1_latch[1] = chip->dphi1_latch[0];
+        chip->dphi2_latch[1] = chip->dphi2_latch[0];
+
+        chip->dphi1_latch[3] = chip->dphi1_latch[2];
     }
+
+    chip->fsm_reset = (chip->ic_check_latch[1] & 16) != 0;
+
+    chip->dclk1 = chip->dphi1_latch[1] && !chip->dphi1_latch[2];
+    chip->dclk2 = chip->dphi2_latch[1] && !chip->dphi2_latch[2];
+
+    chip->o_bco = chip->dphi1_latch[2] || chip->dphi1_latch[3];
 }
 
 void FM_HandleIO(fm_t *chip)
@@ -164,7 +182,7 @@ int FM_ReadTest(fm_t *chip)
 int FM_ReadStatus(fm_t *chip)
 {
     int io_dir = chip->input.cs && chip->input.rd && !chip->input.ic;
-    int read_enable = chip->input.cs && chip->input.rd && !chip->input.ic;
+    int read_enable = chip->input.cs && chip->input.rd && !chip->input.ic && (chip->input.address & 3) == 0;
     int status;
     int testdata = 0;
     if (!io_dir)
@@ -252,69 +270,22 @@ void FM_FSM1(fm_t *chip)
     if (reset)
         chip->fsm_cnt2[0] = 0;
 
-    if (chip->flags & fm_flags_ym2612) // YM2612
+    if (!(chip->flags & fm_flags_ym3438))
     {
-        chip->fsm_clock_eg_l = chip->fsm_out[12];
-        chip->fsm_clock_timers1_l = chip->fsm_out[13];
-        chip->fsm_clock_timers_l = chip->fsm_out[14];
-        chip->fsm_sel23_l = chip->fsm_out[15];
-        chip->fsm_ch3_sel_l = chip->fsm_out[16];
-        chip->fsm_dac_ch6_l = chip->fsm_out[17] || chip->fsm_out[18];
-        chip->fsm_dac_load_l = chip->fsm_out[19] || chip->fsm_out[20] || chip->fsm_out[21];
-        chip->fsm_dac_out_sel_l = chip->fsm_out[22] || chip->fsm_out[23] || chip->fsm_out[24] || chip->fsm_out[25];
+        int cnt_comb = (chip->fsm_cnt2[1] << 2) | chip->fsm_cnt1[1];
 
-        chip->fsm_op4_sel_l = chip->fsm_out[0] || chip->fsm_out[1] || chip->fsm_out[2];
-        chip->fsm_op2_sel_l = chip->fsm_out[3] || chip->fsm_out[4] || chip->fsm_out[5];
-        chip->fsm_op3_sel_l = chip->fsm_out[6] || chip->fsm_out[7] || chip->fsm_out[8];
-        chip->fsm_op1_sel_l = chip->fsm_out[9] || chip->fsm_out[10] || chip->fsm_out[11];
-
-        for (i = 0; i < 3; i++)
-            connect |= ((chip->chan_connect[i][1] >> 4) & 1) << i;
-
-        chip->alg_mod_op1_0_l = 0;
-        chip->alg_mod_op1_1_l = 0;
-        chip->alg_mod_op2_l = 0;
-        chip->alg_mod_prev_0_l = 0;
-        chip->alg_mod_prev_1_l = 0;
-        chip->alg_output_l = 0;
-
-        if (chip->fsm_op2_sel_l)
-        {
-            chip->alg_mod_op1_0_l |= fm_algorithm[0][0][connect];
-            chip->alg_mod_op1_1_l |= fm_algorithm[0][1][connect];
-            chip->alg_mod_op2_l |= fm_algorithm[0][2][connect];
-            chip->alg_mod_prev_0_l |= fm_algorithm[0][3][connect];
-            chip->alg_mod_prev_1_l |= fm_algorithm[0][4][connect];
-            chip->alg_output_l |= fm_algorithm[2][5][connect];
-        }
-        if (chip->fsm_op4_sel_l)
-        {
-            chip->alg_mod_op1_0_l |= fm_algorithm[1][0][connect];
-            chip->alg_mod_op1_1_l |= fm_algorithm[1][1][connect];
-            chip->alg_mod_op2_l |= fm_algorithm[1][2][connect];
-            chip->alg_mod_prev_0_l |= fm_algorithm[1][3][connect];
-            chip->alg_mod_prev_1_l |= fm_algorithm[1][4][connect];
-            chip->alg_output_l |= fm_algorithm[3][5][connect];
-        }
-        if (chip->fsm_op1_sel_l)
-        {
-            chip->alg_mod_op1_0_l |= fm_algorithm[2][0][connect];
-            chip->alg_mod_op1_1_l |= fm_algorithm[2][1][connect];
-            chip->alg_mod_op2_l |= fm_algorithm[2][2][connect];
-            chip->alg_mod_prev_0_l |= fm_algorithm[2][3][connect];
-            chip->alg_mod_prev_1_l |= fm_algorithm[2][4][connect];
-            chip->alg_output_l |= fm_algorithm[0][5][connect];
-        }
-        if (chip->fsm_op3_sel_l)
-        {
-            chip->alg_mod_op1_0_l |= fm_algorithm[3][0][connect];
-            chip->alg_mod_op1_1_l |= fm_algorithm[3][1][connect];
-            chip->alg_mod_op2_l |= fm_algorithm[3][2][connect];
-            chip->alg_mod_prev_0_l |= fm_algorithm[3][3][connect];
-            chip->alg_mod_prev_1_l |= fm_algorithm[3][4][connect];
-            chip->alg_output_l |= fm_algorithm[1][5][connect];
-        }
+        chip->fsm_clock_eg_l = cnt_comb == 30;
+        chip->fsm_op1_sel_l = cnt_comb == 6 || cnt_comb == 8 || cnt_comb == 9 || cnt_comb == 10 || cnt_comb == 12 || cnt_comb == 13;
+        chip->fsm_sel1_l = cnt_comb == 0;
+        chip->fsm_sel2_l = cnt_comb == 1;
+        chip->fsm_sel23_l = cnt_comb == 29;
+        chip->fsm_ch3_sel_l = cnt_comb == 1 || cnt_comb == 9 || cnt_comb == 17 || cnt_comb == 25;
+        chip->fsm_dac_load_l = cnt_comb == 30 || cnt_comb == 4 || cnt_comb == 9 || cnt_comb == 14 || cnt_comb == 20 || cnt_comb == 9;
+        chip->fsm_dac_out_sel_l = cnt_comb == 14 || cnt_comb == 16 || cnt_comb == 17 || cnt_comb == 18 || cnt_comb == 20 || cnt_comb == 21 ||
+            cnt_comb == 22 || cnt_comb == 24 || cnt_comb == 25 || cnt_comb == 26 || cnt_comb == 28 || cnt_comb == 29;
+        chip->fsm_dac_ch6_l = cnt_comb == 4 || cnt_comb == 5 || cnt_comb == 6 || cnt_comb == 8;
     }
+
 }
 
 void FM_FSM2(fm_t *chip)
@@ -326,7 +297,23 @@ void FM_FSM2(fm_t *chip)
 
     cnt_comb = (chip->fsm_cnt2[1] << 2) | chip->fsm_cnt1[1];
 
-    if (!(chip->flags & fm_flags_ym2612)) // YM3438
+    if (!(chip->flags & fm_flags_ym3438))
+    {
+        chip->fsm_clock_eg = chip->fsm_clock_eg_l;
+        chip->fsm_op4_sel = cnt_comb == 0 || cnt_comb == 1 || cnt_comb == 2 || cnt_comb == 4 || cnt_comb == 5 || cnt_comb == 6;
+        chip->fsm_op1_sel = chip->fsm_op1_sel_l;
+        chip->fsm_op3_sel = cnt_comb == 16 || cnt_comb == 17 || cnt_comb == 18 || cnt_comb == 20 || cnt_comb == 21 || cnt_comb == 22;
+        chip->fsm_op2_sel = cnt_comb == 24 || cnt_comb == 25 || cnt_comb == 26 || cnt_comb == 28 || cnt_comb == 29 || cnt_comb == 30;
+        chip->fsm_sel2 = chip->fsm_sel2_l;
+        chip->fsm_sel23 = chip->fsm_sel23_l;
+        chip->fsm_ch3_sel = chip->fsm_ch3_sel_l;
+        chip->fsm_dac_load = chip->fsm_dac_load_l;
+        chip->fsm_dac_out_sel = chip->fsm_dac_out_sel_l;
+        chip->fsm_dac_ch6 = chip->fsm_dac_ch6_l;
+        chip->fsm_clock_timers = chip->fsm_sel2_l;
+        chip->fsm_clock_timers1 = chip->fsm_sel1_l;
+    }
+    else
     {
         chip->fsm_clock_eg = cnt_comb == 0;
         chip->fsm_op4_sel = cnt_comb == 0 || cnt_comb == 1 || cnt_comb == 2 || cnt_comb == 4 || cnt_comb == 5 || cnt_comb == 6;
@@ -342,103 +329,53 @@ void FM_FSM2(fm_t *chip)
         chip->fsm_dac_ch6 = cnt_comb == 5 || cnt_comb == 6 || cnt_comb == 8 || cnt_comb == 9;
         chip->fsm_clock_timers = cnt_comb == 2;
         chip->fsm_clock_timers1 = cnt_comb == 1;
-
-        for (i = 0; i < 3; i++)
-            connect |= ((chip->chan_connect[i][1] >> 5) & 1) << i;
-
-        chip->alg_mod_op1_0 = 0;
-        chip->alg_mod_op1_1 = 0;
-        chip->alg_mod_op2 = 0;
-        chip->alg_mod_prev_0 = 0;
-        chip->alg_mod_prev_1 = 0;
-        chip->alg_output = 0;
-
-        if (chip->fsm_op2_sel)
-        {
-            chip->alg_mod_op1_0 |= fm_algorithm[0][0][connect];
-            chip->alg_mod_op1_1 |= fm_algorithm[0][1][connect];
-            chip->alg_mod_op2 |= fm_algorithm[0][2][connect];
-            chip->alg_mod_prev_0 |= fm_algorithm[0][3][connect];
-            chip->alg_mod_prev_1 |= fm_algorithm[0][4][connect];
-            chip->alg_output |= fm_algorithm[2][5][connect];
-        }
-        if (chip->fsm_op4_sel)
-        {
-            chip->alg_mod_op1_0 |= fm_algorithm[1][0][connect];
-            chip->alg_mod_op1_1 |= fm_algorithm[1][1][connect];
-            chip->alg_mod_op2 |= fm_algorithm[1][2][connect];
-            chip->alg_mod_prev_0 |= fm_algorithm[1][3][connect];
-            chip->alg_mod_prev_1 |= fm_algorithm[1][4][connect];
-            chip->alg_output |= fm_algorithm[3][5][connect];
-        }
-        if (chip->fsm_op1_sel)
-        {
-            chip->alg_mod_op1_0 |= fm_algorithm[2][0][connect];
-            chip->alg_mod_op1_1 |= fm_algorithm[2][1][connect];
-            chip->alg_mod_op2 |= fm_algorithm[2][2][connect];
-            chip->alg_mod_prev_0 |= fm_algorithm[2][3][connect];
-            chip->alg_mod_prev_1 |= fm_algorithm[2][4][connect];
-            chip->alg_output |= fm_algorithm[0][5][connect];
-        }
-        if (chip->fsm_op3_sel)
-        {
-            chip->alg_mod_op1_0 |= fm_algorithm[3][0][connect];
-            chip->alg_mod_op1_1 |= fm_algorithm[3][1][connect];
-            chip->alg_mod_op2 |= fm_algorithm[3][2][connect];
-            chip->alg_mod_prev_0 |= fm_algorithm[3][3][connect];
-            chip->alg_mod_prev_1 |= fm_algorithm[3][4][connect];
-            chip->alg_output |= fm_algorithm[1][5][connect];
-        }
     }
-    else // YM2612
+
+    for (i = 0; i < 3; i++)
+        connect |= ((chip->chan_connect[i][1] >> 5) & 1) << i;
+
+    chip->alg_mod_op1_0 = 0;
+    chip->alg_mod_op1_1 = 0;
+    chip->alg_mod_op2 = 0;
+    chip->alg_mod_prev_0 = 0;
+    chip->alg_mod_prev_1 = 0;
+    chip->alg_output = 0;
+
+    if (chip->fsm_op2_sel)
     {
-        chip->fsm_clock_eg = chip->fsm_clock_eg_l;
-        chip->fsm_op1_sel = chip->fsm_op1_sel_l;
-        chip->fsm_op2_sel = chip->fsm_op2_sel_l;
-        chip->fsm_sel2 = chip->fsm_clock_timers_l;
-        chip->fsm_sel23 = chip->fsm_sel23_l;
-        chip->fsm_ch3_sel = chip->fsm_ch3_sel_l;
-        chip->fsm_dac_load = chip->fsm_dac_load_l;
-        chip->fsm_dac_out_sel = chip->fsm_dac_out_sel_l;
-        chip->fsm_dac_ch6 = chip->fsm_dac_ch6_l;
-        chip->fsm_clock_timers = chip->fsm_clock_timers_l;
-        chip->fsm_clock_timers1 = chip->fsm_clock_timers1_l;
-
-
-
-        chip->fsm_out[0] = (cnt_comb & 30) == 30;
-        chip->fsm_out[1] = (cnt_comb & 28) == 0;
-        chip->fsm_out[2] = (cnt_comb & 30) == 4;
-        chip->fsm_out[3] = (cnt_comb & 30) == 22;
-        chip->fsm_out[4] = (cnt_comb & 28) == 24;
-        chip->fsm_out[5] = (cnt_comb & 30) == 28;
-        chip->fsm_out[6] = (cnt_comb & 30) == 14;
-        chip->fsm_out[7] = (cnt_comb & 28) == 16;
-        chip->fsm_out[8] = (cnt_comb & 30) == 20;
-        chip->fsm_out[9] = (cnt_comb & 30) == 6;
-        chip->fsm_out[10] = (cnt_comb & 28) == 8;
-        chip->fsm_out[11] = (cnt_comb & 30) == 12;
-        chip->fsm_out[12] = (cnt_comb & 30) == 30;
-        chip->fsm_out[13] = cnt_comb == 0;
-        chip->fsm_out[14] = cnt_comb == 1;
-        chip->fsm_out[15] = cnt_comb == 29;
-        chip->fsm_out[16] = (cnt_comb & 7) == 1;
-        chip->fsm_out[17] = (cnt_comb & 28) == 4;
-        chip->fsm_out[18] = cnt_comb == 8;
-        chip->fsm_out[19] = (cnt_comb & 15) == 14;
-        chip->fsm_out[20] = (cnt_comb & 15) == 4;
-        chip->fsm_out[21] = (cnt_comb & 15) == 9;
-        chip->fsm_out[22] = cnt_comb == 14;
-        chip->fsm_out[23] = (cnt_comb & 24) == 16;
-        chip->fsm_out[24] = (cnt_comb & 28) == 24;
-        chip->fsm_out[25] = (cnt_comb & 30) == 28;
-
-        chip->alg_mod_op1_0 = chip->alg_mod_op1_0_l;
-        chip->alg_mod_op1_1 = chip->alg_mod_op1_1_l;
-        chip->alg_mod_op2 = chip->alg_mod_op2_l;
-        chip->alg_mod_prev_0 = chip->alg_mod_prev_0_l;
-        chip->alg_mod_prev_1 = chip->alg_mod_prev_1_l;
-        chip->alg_output = chip->alg_output_l;
+        chip->alg_mod_op1_0 |= fm_algorithm[0][0][connect];
+        chip->alg_mod_op1_1 |= fm_algorithm[0][1][connect];
+        chip->alg_mod_op2 |= fm_algorithm[0][2][connect];
+        chip->alg_mod_prev_0 |= fm_algorithm[0][3][connect];
+        chip->alg_mod_prev_1 |= fm_algorithm[0][4][connect];
+        chip->alg_output |= fm_algorithm[2][5][connect];
+    }
+    if (chip->fsm_op4_sel)
+    {
+        chip->alg_mod_op1_0 |= fm_algorithm[1][0][connect];
+        chip->alg_mod_op1_1 |= fm_algorithm[1][1][connect];
+        chip->alg_mod_op2 |= fm_algorithm[1][2][connect];
+        chip->alg_mod_prev_0 |= fm_algorithm[1][3][connect];
+        chip->alg_mod_prev_1 |= fm_algorithm[1][4][connect];
+        chip->alg_output |= fm_algorithm[3][5][connect];
+    }
+    if (chip->fsm_op1_sel)
+    {
+        chip->alg_mod_op1_0 |= fm_algorithm[2][0][connect];
+        chip->alg_mod_op1_1 |= fm_algorithm[2][1][connect];
+        chip->alg_mod_op2 |= fm_algorithm[2][2][connect];
+        chip->alg_mod_prev_0 |= fm_algorithm[2][3][connect];
+        chip->alg_mod_prev_1 |= fm_algorithm[2][4][connect];
+        chip->alg_output |= fm_algorithm[0][5][connect];
+    }
+    if (chip->fsm_op3_sel)
+    {
+        chip->alg_mod_op1_0 |= fm_algorithm[3][0][connect];
+        chip->alg_mod_op1_1 |= fm_algorithm[3][1][connect];
+        chip->alg_mod_op2 |= fm_algorithm[3][2][connect];
+        chip->alg_mod_prev_0 |= fm_algorithm[3][3][connect];
+        chip->alg_mod_prev_1 |= fm_algorithm[3][4][connect];
+        chip->alg_output |= fm_algorithm[1][5][connect];
     }
 }
 
@@ -1991,21 +1928,18 @@ void FM_Operator2(fm_t *chip)
     chip->op_dofeedback[1] = chip->op_dofeedback[0];
 }
 
-void FM_Accumulator1(fm_t *chip)
+void FM_YM3438Accumulator1(fm_t *chip)
 {
     int i;
     int sum;
     int inp = 0;
     int acc = 0;
     int test_dac = (chip->mode_test_2c[1] & 32) != 0;
-    int connect = 0;
     int load = test_dac || chip->fsm_op1_sel;
     int acc_clear = load && !test_dac;
-    for (i = 0; i < 3; i++)
-        connect |= ((chip->chan_connect[i][1] >> 5) & 1) << i;
     sum = test_dac;
     if (chip->alg_output && !test_dac)
-        inp = chip->op_output[1] >> 5;
+        inp = (chip->op_output[1] >> 5) & 511;
     if (!acc_clear)
         for (i = 0; i < 9; i++)
             acc += ((chip->ch_accm[i][1] >> 5) & 1) << i;
@@ -2036,7 +1970,7 @@ void FM_Accumulator1(fm_t *chip)
     chip->ch_out_debug[0] = chip->ch_out_dlatch;
 }
 
-void FM_Accumulator2(fm_t* chip)
+void FM_YM3438Accumulator2(fm_t* chip)
 {
     int i;
     int test_dac = (chip->mode_test_2c[1] & 32) != 0;
@@ -2084,47 +2018,109 @@ void FM_Accumulator2(fm_t* chip)
                 chip->ch_out_pan_dlatch |= (((chip->chan_pan[i][1] >> 4) & 1) ^ 1) << i;
         }
     }
-    if (!(chip->flags & fm_flags_ym2612))
-    {
-        do_out = test_dac || !chip->fsm_dac_load;
-        if (do_out && (chip->ch_out_pan_dlatch & 2) != 0)
-            chip->out_l = chip->dac_val;
-        else
-            chip->out_l = 0;
-        if (do_out && (chip->ch_out_pan_dlatch & 1) != 0)
-            chip->out_r = chip->dac_val;
-        else
-            chip->out_r = 0;
 
-        if (chip->out_l & 256)
-            chip->out_l |= ~0x1ff;
-        if (chip->out_r & 256)
-            chip->out_r |= ~0x1ff;
+    do_out = test_dac || chip->fsm_dac_load;
+
+    out = chip->dac_val;
+    if (out & 256)
+    {
+        sign = -1;
+        out |= ~0x1ff;
     }
     else
     {
-        do_out = test_dac || chip->fsm_dac_load;
-
-        out = chip->dac_val;
-        if (out & 256)
-        {
-            sign = -1;
-            out |= ~0x1ff;
-        }
-        else
-        {
-            sign = 1;
-            out++;
-        }
+        sign = 1;
+        out++;
+    }
         
-        if (do_out && (chip->ch_out_pan_dlatch & 2) != 0)
-            chip->out_l = out;
+    if (do_out && (chip->ch_out_pan_dlatch & 2) != 0)
+        chip->out_l = out;
+    else
+        chip->out_l = sign;
+    if (do_out && (chip->ch_out_pan_dlatch & 1) != 0)
+        chip->out_r = out;
+    else
+        chip->out_r = sign;
+
+    chip->ch_out_debug[1] = chip->ch_out_debug[0];
+}
+
+void FM_YMF276Accumulator1(fm_t *chip)
+{
+    int i;
+    int sum1;
+    int sum2;
+    int sum;
+    int inp = 0;
+    int accm = 0;
+    int acc = 0;
+    int c;
+    int test_dac = (chip->mode_test_2c[1] & 32) != 0;
+    int test_dac2 = (chip->mode_test_2c[1] & 8) != 0;
+    int load = test_dac || chip->fsm_op1_sel;
+    int acc_clear = load && !test_dac;
+    for (i = 0; i < 14; i++)
+        accm += ((chip->ch_accm[i][1] >> 5) & 1) << i;
+    if (chip->alg_output && !test_dac)
+        inp = chip->op_output[1] & 0x3fff;
+    if (test_dac2)
+        inp = 0x3fff;
+    if (!acc_clear)
+        acc = accm;
+
+    sum1 = (acc & 31) + (inp & 31) + (test_dac && !test_dac2);
+    c = ((sum1 & 32) != 0 || test_dac) && !test_dac2;
+    sum2 = (acc >> 5) + (inp >> 5) + c;
+
+    sum = ((sum2 & 511) << 5) | (sum1 & 31);
+
+    if ((inp & 0x2000) != 0 && (acc & 0x2000) != 0 && (sum & 0x2000) == 0)
+        sum = 0x2000;
+    else if ((inp & 0x2000) == 0 && (acc & 0x2000) == 0 && (sum & 0x2000) != 0)
+        sum = 0x1fff;
+
+    for (i = 0; i < 14; i++)
+        chip->ch_accm[i][0] = (chip->ch_accm[i][1] << 1) | ((sum >> i) & 1);
+
+    for (i = 0; i < 9; i++)
+    {
+        chip->ch_out[i][0] = chip->ch_out[i][1] << 1;
+        if (load)
+            chip->ch_out[i][0] |= (chip->ch_accm[i+5][1] >> 5) & 1;
         else
-            chip->out_l = sign;
-        if (do_out && (chip->ch_out_pan_dlatch & 1) != 0)
-            chip->out_r = out;
+            chip->ch_out[i][0] |= (chip->ch_out[i][1] >> 5) & 1;
+    }
+
+    chip->ch_dac_load = chip->fsm_dac_load;
+
+    chip->ch_out_debug[0] = chip->ch_out_dlatch;
+}
+
+void FM_YMF276Accumulator2(fm_t *chip)
+{
+    int i;
+    int test_dac = (chip->mode_test_2c[1] & 32) != 0;
+    for (i = 0; i < 14; i++)
+    {
+        chip->ch_accm[i][1] = chip->ch_accm[i][0];
+    }
+    for (i = 0; i < 9; i++)
+    {
+        chip->ch_out[i][1] = chip->ch_out[i][0];
+    }
+    if ((chip->fsm_dac_load && !chip->ch_dac_load) || test_dac)
+    {
+        chip->ch_out_dlatch = 0;
+        if (chip->fsm_dac_out_sel || test_dac)
+        {
+            for (i = 0; i < 9; i++)
+                chip->ch_out_dlatch |= ((chip->ch_out[i][1] >> 5) & 1) << i;
+        }
         else
-            chip->out_r = sign;
+        {
+            for (i = 0; i < 9; i++)
+                chip->ch_out_dlatch |= ((chip->ch_out[i][1] >> 4) & 1) << i;
+        }
     }
 
     chip->ch_out_debug[1] = chip->ch_out_debug[0];
@@ -2236,7 +2232,10 @@ void FM_ClockPhase1(fm_t *chip)
     FM_PhaseGenerator1(chip);
     FM_EnvelopeGenerator1(chip);
     FM_Operator1(chip);
-    FM_Accumulator1(chip);
+    if (!(chip->flags & fm_flags_ym3438))
+        FM_YMF276Accumulator1(chip);
+    else
+        FM_YM3438Accumulator1(chip);
     FM_Timers1(chip);
 }
 
@@ -2251,7 +2250,10 @@ void FM_ClockPhase2(fm_t *chip)
     FM_PhaseGenerator2(chip);
     FM_EnvelopeGenerator2(chip);
     FM_Operator2(chip);
-    FM_Accumulator2(chip);
+    if (!(chip->flags & fm_flags_ym3438))
+        FM_YMF276Accumulator2(chip);
+    else
+        FM_YM3438Accumulator2(chip);
     FM_Timers2(chip);
 }
 
