@@ -26,13 +26,13 @@
 #include <stdint.h>
 
 enum {
-    fm_flags_ym3438 = 1,
+    fmopn2_flags_ym3438 = 1,
 };
 
 typedef struct {
     int phi;
     int ic;
-} fm_prescaler_input_t;
+} fmopn2_prescaler_input_t;
 
 typedef struct {
     int phi_phase;
@@ -44,16 +44,16 @@ typedef struct {
     int data;
     int test;
     int i_fsm_reset; // (chip->ic_check_latch[1] & 16) != 0;
-} fm_input_t;
+} fmopn2_input_t;
 
 typedef struct {
     int flags;
     // input
-    fm_input_t input_old, input;
+    fmopn2_input_t input_old, input;
     int i_phi1;
     int i_phi2;
 
-    fm_prescaler_input_t pinput, pinput_old;
+    fmopn2_prescaler_input_t pinput, pinput_old;
 
     // clock
     int ic_latch[2]; // 12
@@ -354,13 +354,9 @@ typedef struct {
     int o_wco;
     int o_lro;
     int o_so;
-
-    int status_time;
-    int last_status;
-} fm_t;
+} fmopn2_t;
 
 
-int FM_ReadStatus(fm_t *chip);
+int FMOPN2_ReadStatus(fmopn2_t *chip);
 
-void FM_Prescaler2(fm_prescaler_t *chip, int clk);
-void FM_Clock2(fm_t *chip, int phi1, int phi2);
+void FMOPN2_Clock(fmopn2_t *chip, int phi);

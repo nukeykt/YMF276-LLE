@@ -71,9 +71,9 @@ static const int fm_algorithm[4][6][8] = {
     }
 };
 
-void FM_ClockPhase1(fm_t *chip);
+void FMOPN2_ClockPhase1(fmopn2_t *chip);
 
-void FM_Prescaler(fm_t *chip)
+void FMOPN2_Prescaler(fmopn2_t *chip)
 {
     if (!chip->pinput.phi)
     {
@@ -93,7 +93,7 @@ void FM_Prescaler(fm_t *chip)
         chip->phi1_latch[0] = (chip->prescaler_latch[1] & 0x21) != 0;
         chip->phi2_latch[0] = (chip->prescaler_latch[1] & 0xc) != 0;
 
-        if (!(chip->flags & fm_flags_ym3438))
+        if (!(chip->flags & fmopn2_flags_ym3438))
         {
             chip->dphi1_latch[0] = (chip->prescaler_latch[1] & 0x9) != 0;
             chip->dphi2_latch[0] = (chip->prescaler_latch[1] & 0x24) != 0;
@@ -110,7 +110,7 @@ void FM_Prescaler(fm_t *chip)
         chip->phi1_latch[1] = chip->phi1_latch[0] & 0x1;
         chip->phi2_latch[1] = chip->phi2_latch[0] & 0x1;
 
-        if (!(chip->flags & fm_flags_ym3438))
+        if (!(chip->flags & fmopn2_flags_ym3438))
         {
             chip->dphi1_latch[1] = chip->dphi1_latch[0];
             chip->dphi2_latch[1] = chip->dphi2_latch[0];
@@ -121,14 +121,14 @@ void FM_Prescaler(fm_t *chip)
 
     chip->fsm_reset = (chip->ic_check_latch[1] & 16) != 0;
 
-    if (!(chip->flags & fm_flags_ym3438))
+    if (!(chip->flags & fmopn2_flags_ym3438))
     {
         chip->dclk1 = chip->dphi1_latch[1] && !chip->dphi1_latch[2];
         chip->dclk2 = chip->dphi2_latch[1] && !chip->dphi2_latch[2];
     }
 }
 
-void FM_YMF276DAC(fm_t *chip)
+void FMOPN2_YMF276DAC(fmopn2_t *chip)
 {
     chip->fsm_load_l = (chip->fsm_shifter_ctrl[1] & 0x20) != 0 && chip->i_phi2;
     chip->fsm_load_r = (chip->fsm_shifter_ctrl[1] & 0x20000) != 0 && chip->i_phi2;
@@ -144,15 +144,15 @@ void FM_YMF276DAC(fm_t *chip)
     }
     if (chip->dclk2)
     {
-        chip->dac_shifter[1] = cihp->dac_shifter[0];
+        chip->dac_shifter[1] = chip->dac_shifter[0];
     }
 
     if (!chip->pinput.phi)
     {
-        chip->fsm_lro_l2[0] = chip->fsm_lro_l2[1];
+        chip->fsm_lro_l2[0] = chip->fsm_lro_l2[1] << 1;
         if (chip->fsm_lro_l[1] & 2)
             chip->fsm_lro_l2[0] |= 1;
-        chip->fsm_wco_l2[0] = chip->fsm_wco_l2[1];
+        chip->fsm_wco_l2[0] = chip->fsm_wco_l2[1] << 1;
         if (chip->fsm_wco_l[1] & 2)
             chip->fsm_wco_l2[0] |= 1;
 
@@ -174,7 +174,7 @@ void FM_YMF276DAC(fm_t *chip)
     chip->o_so = (chip->dac_so_l[1] & 4) != 0;
 }
 
-void FM_HandleIO(fm_t *chip)
+void FMOPN2_HandleIO(fmopn2_t *chip)
 {
     int write_data = chip->input.cs && chip->input.wr && (chip->input.address & 1) == 1 && !chip->input.ic;
     int write_addr = (chip->input.cs && chip->input.wr && (chip->input.address & 1) == 0) || chip->input.ic;
@@ -193,12 +193,6 @@ void FM_HandleIO(fm_t *chip)
     if (write_data)
         chip->write_data_trig = 1;
 
-    if (chip->i_phi1)
-    {
-        // chip->write_addr_trig_sync = chip->write_addr_trig;
-        // chip->write_data_trig_sync = chip->write_data_trig;
-        FM_ClockPhase1(chip);
-    }
     if (!read_enable)
     {
         chip->status_timer_a_dlatch = chip->timer_a_status[1];
@@ -206,7 +200,7 @@ void FM_HandleIO(fm_t *chip)
     }
 }
 
-int FM_GetBus(fm_t *chip)
+int FMOPN2_GetBus(fmopn2_t *chip)
 {
     int data = 0;
     int io_dir = chip->input.cs && chip->input.rd && !chip->input.ic;
@@ -218,21 +212,15 @@ int FM_GetBus(fm_t *chip)
     return data;
 }
 
-void FM_SetTest(fm_t *chip, int test)
-{
-    chip->input.test = test;
-    if (chip->i_phi1)
-        FM_ClockPhase1(chip);
-}
 
-int FM_ReadTest(fm_t *chip)
+int FMOPN2_ReadTest(fmopn2_t *chip)
 {
     if (chip->mode_test_2c[1] & 128)
         return chip->fsm_sel23;
     return 0; // FIXME: high impedance
 }
 
-int FM_ReadStatus(fm_t *chip)
+int FMOPN2_ReadStatus(fmopn2_t *chip)
 {
     int io_dir = chip->input.cs && chip->input.rd && !chip->input.ic;
     int read_enable = chip->input.cs && chip->input.rd && !chip->input.ic && (chip->input.address & 3) == 0;
@@ -243,9 +231,7 @@ int FM_ReadStatus(fm_t *chip)
    
     if (!read_enable)
     {
-        if (chip->status_time)
-            return chip->last_status;
-        return 0;
+        return 0; // FIXME: floating bus
     }
     if (chip->mode_test_21[1] & 64)
     {
@@ -267,49 +253,10 @@ int FM_ReadStatus(fm_t *chip)
     {
         status = (chip->busy_latch[1] << 7) | (chip->status_timer_b_dlatch << 1) | chip->status_timer_a_dlatch;
     }
-    chip->status_time = 4000000;
-    chip->last_status = status;
     return status;
 }
 
-void FM_SetIC(fm_t *chip, int ic)
-{
-    chip->pinput.ic = chip->input.ic = ic & 1;
-    FM_Prescaler(&chip->prescaler);
-    FM_HandleIO(chip);
-}
-
-void FM_SetWrite(fm_t *chip, int wr)
-{
-    chip->input.wr = wr & 1;
-    FM_HandleIO(chip);
-}
-
-void FM_SetRead(fm_t *chip, int rd)
-{
-    chip->input.rd = rd & 1;
-    FM_HandleIO(chip);
-}
-
-void FM_SetCS(fm_t *chip, int cs)
-{
-    chip->input.cs = cs & 1;
-    FM_HandleIO(chip);
-}
-
-void FM_SetAddress(fm_t *chip, int address)
-{
-    chip->input.address = address & 3;
-    FM_HandleIO(chip);
-}
-
-void FM_SetData(fm_t *chip, int data)
-{
-    chip->input.data = data & 255;
-    FM_HandleIO(chip);
-}
-
-void FM_FSM1(fm_t *chip)
+void FMOPN2_FSM1(fmopn2_t *chip)
 {
     int i;
     int connect = 0;
@@ -323,7 +270,7 @@ void FM_FSM1(fm_t *chip)
     if (reset)
         chip->fsm_cnt2[0] = 0;
 
-    if (!(chip->flags & fm_flags_ym3438))
+    if (!(chip->flags & fmopn2_flags_ym3438))
     {
         int cnt_comb = (chip->fsm_cnt2[1] << 2) | chip->fsm_cnt1[1];
 
@@ -346,7 +293,7 @@ void FM_FSM1(fm_t *chip)
 
 }
 
-void FM_FSM2(fm_t *chip)
+void FMOPN2_FSM2(fmopn2_t *chip)
 {
     int i, connect = 0;
     int cnt_comb;
@@ -355,7 +302,7 @@ void FM_FSM2(fm_t *chip)
 
     cnt_comb = (chip->fsm_cnt2[1] << 2) | chip->fsm_cnt1[1];
 
-    if (!(chip->flags & fm_flags_ym3438))
+    if (!(chip->flags & fmopn2_flags_ym3438))
     {
         chip->fsm_clock_eg = chip->fsm_clock_eg_l;
         chip->fsm_op4_sel = cnt_comb == 0 || cnt_comb == 1 || cnt_comb == 2 || cnt_comb == 4 || cnt_comb == 5 || cnt_comb == 6;
@@ -440,7 +387,7 @@ void FM_FSM2(fm_t *chip)
     }
 }
 
-void FM_HandleIO1(fm_t *chip)
+void FMOPN2_HandleIO1(fmopn2_t *chip)
 {
     int write_data_en = !chip->write_data_sr[1] && chip->write_data_dlatch;
     int write_addr_en = !chip->write_addr_sr[1] && chip->write_addr_dlatch;
@@ -458,7 +405,7 @@ void FM_HandleIO1(fm_t *chip)
     chip->io_ic_latch[0] = chip->input.ic;
 }
 
-void FM_HandleIO2(fm_t *chip)
+void FMOPN2_HandleIO2(fmopn2_t *chip)
 {
     chip->write_addr_dlatch = chip->write_addr_trig_sync;
     if (chip->write_addr_dlatch)
@@ -473,7 +420,7 @@ void FM_HandleIO2(fm_t *chip)
     chip->io_ic_latch[1] = chip->io_ic_latch[0] & 1;
 }
 
-void FM_DoShiftRegisters(fm_t *chip, int sel)
+void FMOPN2_DoShiftRegisters(fmopn2_t *chip, int sel)
 {
     int i, j;
     int to = sel;
@@ -551,12 +498,12 @@ void FM_DoShiftRegisters(fm_t *chip, int sel)
 #undef CH_ROTATE
 }
 
-void FM_FMRegisters1(fm_t *chip)
+void FMOPN2_FMRegisters1(fmopn2_t *chip)
 {
     int i, j;
     int write_data_en = !chip->write_data_sr[1] && chip->write_data_dlatch;
     int write_addr_en = !chip->write_addr_sr[1] && chip->write_addr_dlatch;
-    int bus = FM_GetBus(chip);
+    int bus = FMOPN2_GetBus(chip);
     int address = bus | (chip->bank_latch << 8);
     int fm_write = (bus & 0xf0) != 0;
 
@@ -964,7 +911,7 @@ void FM_FMRegisters1(fm_t *chip)
     }
 }
 
-void FM_FMRegisters2(fm_t *chip)
+void FMOPN2_FMRegisters2(fmopn2_t *chip)
 {
     chip->write_fm_address[1] = chip->write_fm_address[0];
     chip->write_fm_data[1] = chip->write_fm_data[0];
@@ -1005,7 +952,7 @@ void FM_FMRegisters2(fm_t *chip)
     chip->mode_kon[3][1] = chip->mode_kon[3][0];
 }
 
-void FM_Misc1(fm_t *chip)
+void FMOPN2_Misc1(fmopn2_t *chip)
 {
     chip->reg_cnt1[0] = chip->reg_cnt1[1] + 1;
     chip->reg_cnt2[0] = chip->reg_cnt2[1];
@@ -1021,13 +968,13 @@ void FM_Misc1(fm_t *chip)
     }
 }
 
-void FM_Misc2(fm_t *chip)
+void FMOPN2_Misc2(fmopn2_t *chip)
 {
     chip->reg_cnt1[1] = chip->reg_cnt1[0] & 3;
     chip->reg_cnt2[1] = chip->reg_cnt2[0] & 7;
 }
 
-void FM_LFO1(fm_t *chip)
+void FMOPN2_LFO1(fmopn2_t *chip)
 {
     static const int lfo_cycles[8] = {
         108, 77, 71, 67, 62, 44, 8, 5
@@ -1051,7 +998,7 @@ void FM_LFO1(fm_t *chip)
     chip->lfo_dlatch_load = chip->lfo_inc_latch[1];
 }
 
-void FM_LFO2(fm_t *chip)
+void FMOPN2_LFO2(fmopn2_t *chip)
 {
     chip->lfo_cnt1[1] = chip->lfo_cnt1[0] & 127;
     chip->lfo_cnt2[1] = chip->lfo_cnt2[0] & 127;
@@ -1060,7 +1007,7 @@ void FM_LFO2(fm_t *chip)
         chip->lfo_dlatch = chip->lfo_cnt2[1];
 }
 
-void FM_PhaseGenerator1(fm_t *chip)
+void FMOPN2_PhaseGenerator1(fmopn2_t *chip)
 {
     // Note table
     static const int fn_note[16] = {
@@ -1236,7 +1183,7 @@ void FM_PhaseGenerator1(fm_t *chip)
     }
 }
 
-void FM_PhaseGenerator2(fm_t *chip)
+void FMOPN2_PhaseGenerator2(fmopn2_t *chip)
 {
     int i;
     int block = chip->pg_kcode[1][0];
@@ -1267,7 +1214,7 @@ void FM_PhaseGenerator2(fm_t *chip)
     chip->pg_debug[1] = chip->pg_debug[0];
 }
 
-void FM_EnvelopeGenerator1(fm_t *chip)
+void FMOPN2_EnvelopeGenerator1(fmopn2_t *chip)
 {
     int i;
     int sum;
@@ -1342,7 +1289,7 @@ void FM_EnvelopeGenerator1(fm_t *chip)
     if (chip->mode_test_2c[1] & 64)
     {
         if (chip->mode_test_2c[1] & 128) // Assuming TEST pin is NC
-            timer_bit |= FM_ReadTest(chip);
+            timer_bit |= FMOPN2_ReadTest(chip);
         else
             timer_bit |= chip->input.test & 1;
     }
@@ -1663,7 +1610,7 @@ void FM_EnvelopeGenerator1(fm_t *chip)
         chip->eg_debug[0] |= chip->eg_out_total;
 }
 
-void FM_EnvelopeGenerator2(fm_t *chip)
+void FMOPN2_EnvelopeGenerator2(fmopn2_t *chip)
 {
     int i;
     int b0, b1, b2, b3;
@@ -1768,7 +1715,7 @@ void FM_EnvelopeGenerator2(fm_t *chip)
     chip->eg_key[1] = chip->eg_key[0];
 }
 
-void FM_Operator1(fm_t *chip)
+void FMOPN2_Operator1(fmopn2_t *chip)
 {
     int i;
     int carry = 0;
@@ -1960,7 +1907,7 @@ void FM_Operator1(fm_t *chip)
     }
 }
 
-void FM_Operator2(fm_t *chip)
+void FMOPN2_Operator2(fmopn2_t *chip)
 {
     int i;
     for (i = 0; i < 10; i++)
@@ -1989,7 +1936,7 @@ void FM_Operator2(fm_t *chip)
     chip->op_dofeedback[1] = chip->op_dofeedback[0];
 }
 
-void FM_YM3438Accumulator1(fm_t *chip)
+void FMOPN2_YM3438Accumulator1(fmopn2_t *chip)
 {
     int i;
     int sum;
@@ -2031,7 +1978,7 @@ void FM_YM3438Accumulator1(fm_t *chip)
     chip->ch_out_debug[0] = chip->ch_out_dlatch;
 }
 
-void FM_YM3438Accumulator2(fm_t* chip)
+void FMOPN2_YM3438Accumulator2(fmopn2_t* chip)
 {
     int i;
     int test_dac = (chip->mode_test_2c[1] & 32) != 0;
@@ -2080,33 +2027,25 @@ void FM_YM3438Accumulator2(fm_t* chip)
         }
     }
 
-    do_out = test_dac || chip->fsm_dac_load;
-
-    out = chip->dac_val;
-    if (out & 256)
-    {
-        sign = -1;
-        out |= ~0x1ff;
-    }
-    else
-    {
-        sign = 1;
-        out++;
-    }
-        
+    do_out = test_dac || !chip->fsm_dac_load;
     if (do_out && (chip->ch_out_pan_dlatch & 2) != 0)
-        chip->out_l = out;
+        chip->out_l = chip->dac_val;
     else
-        chip->out_l = sign;
+        chip->out_l = 0;
     if (do_out && (chip->ch_out_pan_dlatch & 1) != 0)
-        chip->out_r = out;
+        chip->out_r = chip->dac_val;
     else
-        chip->out_r = sign;
+        chip->out_r = 0;
+
+    if (chip->out_l & 256)
+        chip->out_l |= ~0x1ff;
+    if (chip->out_r & 256)
+        chip->out_r |= ~0x1ff;
 
     chip->ch_out_debug[1] = chip->ch_out_debug[0];
 }
 
-void FM_YMF276Accumulator1(fm_t *chip)
+void FMOPN2_YMF276Accumulator1(fmopn2_t *chip)
 {
     int i;
     int sum1;
@@ -2195,7 +2134,7 @@ void FM_YMF276Accumulator1(fm_t *chip)
     chip->ch_accm_r[0] = acc_r + ((pan & 1) != 0 ? out : 0);
 }
 
-void FM_YMF276Accumulator2(fm_t *chip)
+void FMOPN2_YMF276Accumulator2(fmopn2_t *chip)
 {
     int i;
     int test_dac = (chip->mode_test_2c[1] & 32) != 0;
@@ -2230,10 +2169,10 @@ void FM_YMF276Accumulator2(fm_t *chip)
     chip->ch_accm_l[1] = chip->ch_accm_l[0];
     chip->ch_accm_r[1] = chip->ch_accm_r[0];
 
-    chip->fsm_shifter_ctrl[1] = chip->fsm_shifter_ctrl[0];)
+    chip->fsm_shifter_ctrl[1] = chip->fsm_shifter_ctrl[0];
 }
 
-void FM_Timers1(fm_t *chip)
+void FMOPN2_Timers1(fmopn2_t *chip)
 {
     int time;
     int test_timers = (chip->mode_test_21[1] & 4) != 0;
@@ -2300,7 +2239,7 @@ void FM_Timers1(fm_t *chip)
     chip->timer_dlatch = chip->fsm_clock_timers;
 }
 
-void FM_Timers2(fm_t *chip)
+void FMOPN2_Timers2(fmopn2_t *chip)
 {
     int read_enable = chip->input.cs && chip->input.rd && !chip->input.ic;
     chip->timer_a_load_latch[1] = chip->timer_a_load_latch[0];
@@ -2328,70 +2267,61 @@ void FM_Timers2(fm_t *chip)
     }
 }
 
-void FM_ClockPhase1(fm_t *chip)
+void FMOPN2_ClockPhase1(fmopn2_t *chip)
 {
-    FM_DoShiftRegisters(chip, 0);
-    FM_HandleIO1(chip);
-    FM_FMRegisters1(chip);
-    FM_FSM1(chip);
-    FM_Misc1(chip);
-    FM_LFO1(chip);
-    FM_PhaseGenerator1(chip);
-    FM_EnvelopeGenerator1(chip);
-    FM_Operator1(chip);
-    if (!(chip->flags & fm_flags_ym3438))
-        FM_YMF276Accumulator1(chip);
+    FMOPN2_DoShiftRegisters(chip, 0);
+    FMOPN2_HandleIO1(chip);
+    FMOPN2_FMRegisters1(chip);
+    FMOPN2_FSM1(chip);
+    FMOPN2_Misc1(chip);
+    FMOPN2_LFO1(chip);
+    FMOPN2_PhaseGenerator1(chip);
+    FMOPN2_EnvelopeGenerator1(chip);
+    FMOPN2_Operator1(chip);
+    if (!(chip->flags & fmopn2_flags_ym3438))
+        FMOPN2_YMF276Accumulator1(chip);
     else
-        FM_YM3438Accumulator1(chip);
-    FM_Timers1(chip);
+        FMOPN2_YM3438Accumulator1(chip);
+    FMOPN2_Timers1(chip);
 }
 
-void FM_ClockPhase2(fm_t *chip)
+void FMOPN2_ClockPhase2(fmopn2_t *chip)
 {
-    FM_DoShiftRegisters(chip, 1);
-    FM_HandleIO2(chip);
-    FM_FMRegisters2(chip);
-    FM_FSM2(chip);
-    FM_Misc2(chip);
-    FM_LFO2(chip);
-    FM_PhaseGenerator2(chip);
-    FM_EnvelopeGenerator2(chip);
-    FM_Operator2(chip);
-    if (!(chip->flags & fm_flags_ym3438))
-        FM_YMF276Accumulator2(chip);
+    FMOPN2_DoShiftRegisters(chip, 1);
+    FMOPN2_HandleIO2(chip);
+    FMOPN2_FMRegisters2(chip);
+    FMOPN2_FSM2(chip);
+    FMOPN2_Misc2(chip);
+    FMOPN2_LFO2(chip);
+    FMOPN2_PhaseGenerator2(chip);
+    FMOPN2_EnvelopeGenerator2(chip);
+    FMOPN2_Operator2(chip);
+    if (!(chip->flags & fmopn2_flags_ym3438))
+        FMOPN2_YMF276Accumulator2(chip);
     else
-        FM_YM3438Accumulator2(chip);
-    FM_Timers2(chip);
+        FMOPN2_YM3438Accumulator2(chip);
+    FMOPN2_Timers2(chip);
 }
 
-void FM_ClockFM(fm_t *chip)
+void FMOPN2_ClockFM(fmopn2_t *chip)
 {
-#if 0
-    if (chip->phi != phi)
-    {
-        if (chip->status_time)
-            chip->status_time--;
-    }
-    chip->phi = phi;
-    FM_Prescaler(chip);
-#endif
-    FM_HandleIO(chip);
+    FMOPN2_HandleIO(chip);
     if (chip->i_phi1)
     {
-        FM_ClockPhase1(chip);
+        FMOPN2_ClockPhase1(chip);
     }
     if (chip->i_phi2)
     {
-        FM_ClockPhase2(chip);
+        FMOPN2_ClockPhase2(chip);
     }
 }
 
-void FM_Clock(fm_t *chip, int clk)
+void FMOPN2_Clock(fmopn2_t *chip, int clk)
 {
     chip->pinput.phi = clk;
     if (memcmp(&chip->pinput, &chip->pinput_old, sizeof(chip->pinput)) != 0)
     {
-        FM_Prescaler(chip);
+        FMOPN2_Prescaler(chip);
         chip->pinput_old = chip->pinput;
         chip->input.i_fsm_reset = chip->fsm_reset;
         if (chip->phi1_latch[1])
@@ -2403,95 +2333,10 @@ void FM_Clock(fm_t *chip, int clk)
     }
     if (memcmp(&chip->input, &chip->input_old, sizeof(chip->input)) != 0)
     {
-        FM_ClockFM(chip);
+        FMOPN2_ClockFM(chip);
         chip->input_old = chip->input;
     }
 
-    if (!(chip->flags & fm_flags_ym3438))
-        FM_YMF276DAC(chip);
+    if (!(chip->flags & fmopn2_flags_ym3438))
+        FMOPN2_YMF276DAC(chip);
 }
-
-
-#if 0
-void main(void)
-{
-    int i;
-    fm_t fm;
-    memset(&fm, 0, sizeof(fm));
-
-    FM_SetCS(&fm, 1);
-    FM_SetRead(&fm, 0);
-    FM_SetWrite(&fm, 0);
-    FM_SetAddress(&fm, 0);
-    FM_SetData(&fm, 0);
-
-    for (i = 0; i < 200; i++)
-    {
-        FM_Clock(&fm, 0);
-        FM_Clock(&fm, 1);
-        int v1 = fm.lfo_cnt2[1];
-        int v2 = 0;
-        int v3 = 0;
-        int v4 = 0;
-        if ((i % 144) == 0)
-        printf("%i %i %i %i %i\n", i, v1, v2, v3, v4);
-    }
-
-    FM_SetIC(&fm, 1);
-    for (;i < 400; i++)
-    {
-        FM_Clock(&fm, 0);
-        FM_Clock(&fm, 1);
-        int v1 = fm.lfo_cnt2[1];
-        int v2 = 0;
-        int v3 = 0;
-        int v4 = 0;
-        if ((i % 144) == 0)
-        printf("%i %i %i %i %i\n", i, v1, v2, v3, v4);
-    }
-    FM_SetIC(&fm, 0);
-    for (;i < 600; i++)
-    {
-        FM_Clock(&fm, 0);
-        FM_Clock(&fm, 1);
-        int v1 = fm.lfo_cnt2[1];
-        int v2 = 0;
-        int v3 = 0;
-        int v4 = 0;
-        if ((i % 144) == 0)
-        printf("%i %i %i %i %i\n", i, v1, v2, v3, v4);
-    }
-
-    FM_SetAddress(&fm, 0);
-    FM_SetData(&fm, 0x22);
-    FM_SetWrite(&fm, 1);
-    FM_SetWrite(&fm, 0);
-    for (; i < 1000; i++)
-    {
-        FM_Clock(&fm, 0);
-        FM_Clock(&fm, 1);
-        int v1 = fm.lfo_cnt2[1];
-        int v2 = 0;
-        int v3 = 0;
-        int v4 = 0;
-        if ((i % 144) == 0)
-        printf("%i %i %i %i %i\n", i, v1, v2, v3, v4);
-    }
-
-    FM_SetAddress(&fm, 1);
-    FM_SetData(&fm, 0xf);
-    FM_SetWrite(&fm, 1);
-    FM_SetWrite(&fm, 0);
-    for (; i < 144 * 53267; i++)
-    {
-        FM_Clock(&fm, 0);
-        FM_Clock(&fm, 1);
-        int v1 = fm.lfo_dlatch;
-        int v2 = 0;
-        int v3 = 0;
-        int v4 = 0;
-        //if ((i % 144) == 0)
-        //    printf("%i %i %i %i %i\n", i, v1, v2, v3, v4);
-    }
-}
-#endif
