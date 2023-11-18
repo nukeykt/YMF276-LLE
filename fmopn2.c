@@ -73,16 +73,16 @@ static const int fm_algorithm[4][6][8] = {
 
 void FM_ClockPhase1(fm_t *chip);
 
-void FM_Prescaler(fm_prescaler_t *chip)
+void FM_Prescaler(fm_t *chip)
 {
-    if (!chip->input.phi)
+    if (!chip->pinput.phi)
     {
         int ic_check;
 
         chip->ic_latch[0] = chip->ic_latch[1] << 1;
-        chip->ic_latch[0] |= chip->input.ic;
+        chip->ic_latch[0] |= chip->pinput.ic;
 
-        ic_check = (chip->ic_latch[1] & 0x800) == 0 && chip->input.ic;
+        ic_check = (chip->ic_latch[1] & 0x800) == 0 && chip->pinput.ic;
 
         chip->prescaler_latch[0] = chip->prescaler_latch[1] << 1;
         chip->prescaler_latch[0] |= !ic_check && (chip->prescaler_latch[1] & 0x1f) == 0;
@@ -93,11 +93,14 @@ void FM_Prescaler(fm_prescaler_t *chip)
         chip->phi1_latch[0] = (chip->prescaler_latch[1] & 0x21) != 0;
         chip->phi2_latch[0] = (chip->prescaler_latch[1] & 0xc) != 0;
 
-        chip->dphi1_latch[0] = (chip->prescaler_latch[1] & 0x9) != 0;
-        chip->dphi2_latch[0] = (chip->prescaler_latch[1] & 0x24) != 0;
+        if (!(chip->flags & fm_flags_ym3438))
+        {
+            chip->dphi1_latch[0] = (chip->prescaler_latch[1] & 0x9) != 0;
+            chip->dphi2_latch[0] = (chip->prescaler_latch[1] & 0x24) != 0;
 
-        chip->dphi1_latch[2] = chip->dphi1_latch[1];
-        chip->dphi2_latch[2] = chip->dphi2_latch[1];
+            chip->dphi1_latch[2] = chip->dphi1_latch[1];
+            chip->dphi2_latch[2] = chip->dphi2_latch[1];
+        }
     }
     else
     {
@@ -107,18 +110,68 @@ void FM_Prescaler(fm_prescaler_t *chip)
         chip->phi1_latch[1] = chip->phi1_latch[0] & 0x1;
         chip->phi2_latch[1] = chip->phi2_latch[0] & 0x1;
 
-        chip->dphi1_latch[1] = chip->dphi1_latch[0];
-        chip->dphi2_latch[1] = chip->dphi2_latch[0];
+        if (!(chip->flags & fm_flags_ym3438))
+        {
+            chip->dphi1_latch[1] = chip->dphi1_latch[0];
+            chip->dphi2_latch[1] = chip->dphi2_latch[0];
 
-        chip->dphi1_latch[3] = chip->dphi1_latch[2];
+            chip->dphi1_latch[3] = chip->dphi1_latch[2];
+        }
     }
 
     chip->fsm_reset = (chip->ic_check_latch[1] & 16) != 0;
 
-    chip->dclk1 = chip->dphi1_latch[1] && !chip->dphi1_latch[2];
-    chip->dclk2 = chip->dphi2_latch[1] && !chip->dphi2_latch[2];
+    if (!(chip->flags & fm_flags_ym3438))
+    {
+        chip->dclk1 = chip->dphi1_latch[1] && !chip->dphi1_latch[2];
+        chip->dclk2 = chip->dphi2_latch[1] && !chip->dphi2_latch[2];
+    }
+}
+
+void FM_YMF276DAC(fm_t *chip)
+{
+    chip->fsm_load_l = (chip->fsm_shifter_ctrl[1] & 0x20) != 0 && chip->i_phi2;
+    chip->fsm_load_r = (chip->fsm_shifter_ctrl[1] & 0x20000) != 0 && chip->i_phi2;
+
+    if (chip->dclk1)
+    {
+        chip->dac_shifter[0] = chip->dac_shifter[1] << 1;
+
+        if (chip->fsm_load_l)
+            chip->dac_shifter[0] |= (chip->ch_accm_l[1] >> 1);
+        if (chip->fsm_load_r)
+            chip->dac_shifter[0] |= (chip->ch_accm_r[1] >> 1);
+    }
+    if (chip->dclk2)
+    {
+        chip->dac_shifter[1] = cihp->dac_shifter[0];
+    }
+
+    if (!chip->pinput.phi)
+    {
+        chip->fsm_lro_l2[0] = chip->fsm_lro_l2[1];
+        if (chip->fsm_lro_l[1] & 2)
+            chip->fsm_lro_l2[0] |= 1;
+        chip->fsm_wco_l2[0] = chip->fsm_wco_l2[1];
+        if (chip->fsm_wco_l[1] & 2)
+            chip->fsm_wco_l2[0] |= 1;
+
+        chip->dac_so_l[0] = chip->dac_so_l[1] << 1;
+        if (chip->dac_shifter[1] & 0x8000)
+            chip->dac_so_l[0] |= 1;
+    }
+    else
+    {
+        chip->fsm_lro_l2[1] = chip->fsm_lro_l2[0];
+        chip->fsm_wco_l2[1] = chip->fsm_wco_l2[0];
+
+        chip->dac_so_l[1] = chip->dac_so_l[0];
+    }
 
     chip->o_bco = chip->dphi1_latch[2] || chip->dphi1_latch[3];
+    chip->o_wco = (chip->fsm_wco_l2[1] & 32) != 0;
+    chip->o_lro = (chip->fsm_lro_l2[1] & 32) != 0;
+    chip->o_so = (chip->dac_so_l[1] & 4) != 0;
 }
 
 void FM_HandleIO(fm_t *chip)
@@ -221,7 +274,7 @@ int FM_ReadStatus(fm_t *chip)
 
 void FM_SetIC(fm_t *chip, int ic)
 {
-    chip->input.ic = ic & 1;
+    chip->pinput.ic = chip->input.ic = ic & 1;
     FM_Prescaler(&chip->prescaler);
     FM_HandleIO(chip);
 }
@@ -284,6 +337,11 @@ void FM_FSM1(fm_t *chip)
         chip->fsm_dac_out_sel_l = cnt_comb == 14 || cnt_comb == 16 || cnt_comb == 17 || cnt_comb == 18 || cnt_comb == 20 || cnt_comb == 21 ||
             cnt_comb == 22 || cnt_comb == 24 || cnt_comb == 25 || cnt_comb == 26 || cnt_comb == 28 || cnt_comb == 29;
         chip->fsm_dac_ch6_l = cnt_comb == 4 || cnt_comb == 5 || cnt_comb == 6 || cnt_comb == 8;
+
+        chip->fsm_wco_l[0] = (chip->fsm_wco_l[1] << 1) | ((cnt_comb & 8) == 0);
+        chip->fsm_lro_l[0] = chip->fsm_lro_l[1] << 1;
+        if (((cnt_comb >> 3) ^ (cnt_comb >> 4)) & 1)
+            chip->fsm_lro_l[0] |= 1;
     }
 
 }
@@ -312,6 +370,9 @@ void FM_FSM2(fm_t *chip)
         chip->fsm_dac_ch6 = chip->fsm_dac_ch6_l;
         chip->fsm_clock_timers = chip->fsm_sel2_l;
         chip->fsm_clock_timers1 = chip->fsm_sel1_l;
+
+        chip->fsm_wco_l[1] = chip->fsm_wco_l[0];
+        chip->fsm_lro_l[1] = chip->fsm_lro_l[0];
     }
     else
     {
@@ -2059,6 +2120,13 @@ void FM_YMF276Accumulator1(fm_t *chip)
     int test_dac2 = (chip->mode_test_2c[1] & 8) != 0;
     int load = test_dac || chip->fsm_op1_sel;
     int acc_clear = load && !test_dac;
+    int sel_dac = (chip->fsm_op1_sel_l2[1] & 16) != 0 && chip->fsm_op1_sel && chip->mode_dac_en[1];
+    int sel_fm = chip->fsm_op1_sel && !sel_dac;
+    int out = 0;
+    int pan = 0;
+    int acc_l = 0;
+    int acc_r = 0;
+
     for (i = 0; i < 14; i++)
         accm += ((chip->ch_accm[i][1] >> 5) & 1) << i;
     if (chip->alg_output && !test_dac)
@@ -2094,6 +2162,37 @@ void FM_YMF276Accumulator1(fm_t *chip)
     chip->ch_dac_load = chip->fsm_dac_load;
 
     chip->ch_out_debug[0] = chip->ch_out_dlatch;
+
+    chip->fsm_op1_sel_l2[0] = (chip->fsm_op1_sel_l2[1] << 1) | chip->fsm_op1_sel;
+    chip->fsm_op1_sel_l3[0] = chip->fsm_op1_sel;
+
+    if (sel_dac)
+        out |= chip->mode_dac_data[1] << 6;
+    if (sel_fm)
+        out |= accm;
+
+    if (out & 0x2000)
+        out |= 0x1c000;
+
+    for (i = 0; i < 2; i++)
+        pan |= (((chip->chan_pan[i][1] >> 5) & 1) ^ 1) << i;
+
+    chip->fsm_shifter_ctrl[0] = chip->fsm_shifter_ctrl[1] << 1;
+
+    if (chip->fsm_op1_sel && !chip->fsm_op1_sel_l3[1])
+    {
+        acc_l = 0;
+        acc_r = 0;
+        chip->fsm_shifter_ctrl[0] |= 1;
+    }
+    else
+    {
+        acc_l = chip->ch_accm_l[1];
+        acc_r = chip->ch_accm_r[1];
+    }
+
+    chip->ch_accm_l[0] = acc_l + ((pan & 2) != 0 ? out : 0);
+    chip->ch_accm_r[0] = acc_r + ((pan & 1) != 0 ? out : 0);
 }
 
 void FM_YMF276Accumulator2(fm_t *chip)
@@ -2124,6 +2223,14 @@ void FM_YMF276Accumulator2(fm_t *chip)
     }
 
     chip->ch_out_debug[1] = chip->ch_out_debug[0];
+
+    chip->fsm_op1_sel_l2[1] = chip->fsm_op1_sel_l2[0];
+    chip->fsm_op1_sel_l3[1] = chip->fsm_op1_sel_l3[0];
+    
+    chip->ch_accm_l[1] = chip->ch_accm_l[0];
+    chip->ch_accm_r[1] = chip->ch_accm_r[0];
+
+    chip->fsm_shifter_ctrl[1] = chip->fsm_shifter_ctrl[0];)
 }
 
 void FM_Timers1(fm_t *chip)
@@ -2257,7 +2364,7 @@ void FM_ClockPhase2(fm_t *chip)
     FM_Timers2(chip);
 }
 
-void FM_Clock(fm_t *chip)
+void FM_ClockFM(fm_t *chip)
 {
 #if 0
     if (chip->phi != phi)
@@ -2279,27 +2386,29 @@ void FM_Clock(fm_t *chip)
     }
 }
 
-void FM_Prescaler2(fm_prescaler_t *chip, int clk)
+void FM_Clock(fm_t *chip, int clk)
 {
-    chip->input.phi = clk;
-    if (!memcmp(&chip->input, &chip->input_old, sizeof(chip->input)))
-        return;
-    FM_Prescaler(chip);
-    chip->input_old = chip->input;
-}
+    chip->pinput.phi = clk;
+    if (memcmp(&chip->pinput, &chip->pinput_old, sizeof(chip->pinput)) != 0)
+    {
+        FM_Prescaler(chip);
+        chip->pinput_old = chip->pinput;
+        chip->input.i_fsm_reset = chip->fsm_reset;
+        if (chip->phi1_latch[1])
+            chip->input.phi_phase = 1;
+        if (chip->phi2_latch[1])
+            chip->input.phi_phase = 2;
+        chip->i_phi1 = chip->phi1_latch[1];
+        chip->i_phi2 = chip->phi2_latch[1];
+    }
+    if (memcmp(&chip->input, &chip->input_old, sizeof(chip->input)) != 0)
+    {
+        FM_ClockFM(chip);
+        chip->input_old = chip->input;
+    }
 
-void FM_Clock2(fm_t *chip, int phi1, int phi2)
-{
-    if (phi1)
-        chip->input.phi_phase = 1;
-    if (phi2)
-        chip->input.phi_phase = 2;
-    chip->i_phi1 = phi1;
-    chip->i_phi2 = phi2;
-    if (!memcmp(&chip->input, &chip->input_old, sizeof(chip->input)))
-        return;
-    FM_Clock(chip);
-    chip->input_old = chip->input;
+    if (!(chip->flags & fm_flags_ym3438))
+        FM_YMF276DAC(chip);
 }
 
 

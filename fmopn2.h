@@ -35,23 +35,6 @@ typedef struct {
 } fm_prescaler_input_t;
 
 typedef struct {
-    fm_prescaler_input_t input, input_old;
-
-    // clock
-    int ic_latch[2]; // 12
-    int ic_check_latch[2]; // 4
-    int prescaler_latch[2]; // 6
-    int phi1_latch[2];
-    int phi2_latch[2];
-    int dphi1_latch[4];
-    int dphi2_latch[3];
-    int dclk1;
-    int dclk2;
-    int o_bco;
-    int fsm_reset;
-} fm_prescaler_t;
-
-typedef struct {
     int phi_phase;
     int ic;
     int rd;
@@ -70,7 +53,19 @@ typedef struct {
     int i_phi1;
     int i_phi2;
 
-    fm_prescaler_t prescaler;
+    fm_prescaler_input_t pinput, pinput_old;
+
+    // clock
+    int ic_latch[2]; // 12
+    int ic_check_latch[2]; // 4
+    int prescaler_latch[2]; // 6
+    int phi1_latch[2];
+    int phi2_latch[2];
+    int dphi1_latch[4];
+    int dphi2_latch[3];
+    int dclk1;
+    int dclk2;
+    int fsm_reset;
 
     // output
     int dac_val;
@@ -280,6 +275,8 @@ typedef struct {
     int ch_out_pan_dlatch;
     int ch_dac_load;
     int ch_out_debug[2];
+    int ch_accm_l[2];
+    int ch_accm_r[2];
 
     // timers
     int timer_dlatch;
@@ -341,6 +338,22 @@ typedef struct {
     int fsm_dac_load_l;
     int fsm_dac_out_sel_l;
     int fsm_dac_ch6_l;
+    int fsm_lro_l[2];
+    int fsm_wco_l[2];
+    int fsm_lro_l2[2];
+    int fsm_wco_l2[2];
+    int fsm_op1_sel_l2[2];
+    int fsm_op1_sel_l3[2];
+    int fsm_shifter_ctrl[2];
+    int fsm_load_l;
+    int fsm_load_r;
+
+    int dac_shifter[2];
+    int dac_so_l[2];
+    int o_bco;
+    int o_wco;
+    int o_lro;
+    int o_so;
 
     int status_time;
     int last_status;
