@@ -119,7 +119,7 @@ void FMOPN2_Prescaler(fmopn2_t *chip)
         }
     }
 
-    chip->fsm_reset = (chip->ic_check_latch[1] & 16) != 0;
+    chip->fsm_reset = (chip->ic_check_latch[1] & 8) != 0;
 
     if (!(chip->flags & fmopn2_flags_ym3438))
     {
